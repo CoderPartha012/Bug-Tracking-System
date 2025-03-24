@@ -2,7 +2,7 @@
 
 A modern, feature-rich bug tracking application built with React and TypeScript. Track, manage, and collaborate on software bugs efficiently with a beautiful and intuitive interface.
 
-![Bug Tracker Screenshot](https://images.unsplash.com/photo-1461749280684-dccba630e2f6?auto=format&fit=crop&q=80&w=1000)
+![Bug Tracker Screenshot](https://i.postimg.cc/4N9S6KBS/ksdh.png)
 
 ## 🌍 Live Demo
 
