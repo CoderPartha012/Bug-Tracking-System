@@ -11,4 +11,8 @@ export default {
     },
   },
   plugins: [],
+  safelist: [
+    // Dynamic progress-bar & onboarding widths
+    { pattern: /^w-\[(\d|[1-9]\d|100)%\]$/ },
+  ],
 };

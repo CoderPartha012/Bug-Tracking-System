@@ -1,11 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 type Theme = 'light' | 'dark';
-
-interface ThemeContextType {
-  theme: Theme;
-  toggleTheme: () => void;
-}
+interface ThemeContextType { theme: Theme; toggleTheme: () => void }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
@@ -21,7 +17,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   const toggleTheme = () => {
+    // Temporarily enable color transitions on every element while the theme switches
+    document.documentElement.classList.add('theme-switching');
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
+    setTimeout(() => document.documentElement.classList.remove('theme-switching'), 400);
   };
 
   return (
@@ -33,8 +32,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
 export const useTheme = () => {
   const context = useContext(ThemeContext);
-  if (context === undefined) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
+  if (!context) throw new Error('useTheme must be used within a ThemeProvider');
   return context;
 };
