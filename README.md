@@ -2,11 +2,11 @@
 
 A modern, feature-rich bug tracking application built with React and TypeScript. Track, manage, and collaborate on software bugs efficiently with a beautiful and intuitive interface.
 
-![Bug Tracker Screenshot](https://i.postimg.cc/4N9S6KBS/ksdh.png)
+![Bug Tracker Screenshot](https://i.postimg.cc/d1WtCPmX/ksjd.png)
 
 ## 🌍 Live Demo
 
-Check out the live version of Bug Tracking System: [Bug Tracking System Live](https://bug-tracking-system.netlify.app/)
+Check out the live version of Bug Tracking System: [Bug Tracking System Live](https://bugdesk.netlify.app/)
 
 ## Features
 
