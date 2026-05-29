@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Bug, Severity, Status } from '../types/bug';
 import { useBugs } from '../context/BugContext';
+import { STATUS_CONFIGS } from '../lib/statusConfig';
 import {
   X, ChevronRight, ChevronLeft, Zap, CheckCircle,
   FileText, Settings, Paperclip,
@@ -22,7 +23,7 @@ const emptyForm = {
   title: '',
   description: '',
   severity: 'low' as Severity,
-  status: 'open' as Status,
+  status: 'new' as Status,
   assignedTo: '',
   screenshots: [] as string[],
   comments: [] as Bug['comments'],
@@ -319,7 +320,7 @@ export function BugForm({ bug, onClose }: BugFormProps) {
                     {errMsg('title')}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className={isEdit ? 'grid grid-cols-2 gap-4' : ''}>
                     <div>
                       <label htmlFor="bug-severity" className={labelCls}>Severity</label>
                       <select
@@ -333,20 +334,28 @@ export function BugForm({ bug, onClose }: BugFormProps) {
                         <option value="high">High</option>
                       </select>
                     </div>
-                    <div>
-                      <label htmlFor="bug-status" className={labelCls}>Status</label>
-                      <select
-                        id="bug-status"
-                        value={formData.status}
-                        onChange={e => update('status', e.target.value as Status)}
-                        className={fieldCls('status')}
-                      >
-                        <option value="open">Open</option>
-                        <option value="in-progress">In Progress</option>
-                        <option value="closed">Closed</option>
-                      </select>
-                    </div>
+                    {isEdit && (
+                      <div>
+                        <label htmlFor="bug-status" className={labelCls}>Status</label>
+                        <select
+                          id="bug-status"
+                          value={formData.status}
+                          onChange={e => update('status', e.target.value as Status)}
+                          className={fieldCls('status')}
+                        >
+                          {STATUS_CONFIGS.map(cfg => (
+                            <option key={cfg.status} value={cfg.status}>{cfg.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
+                  {!isEdit && (
+                    <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
+                      <span className="inline-block w-2 h-2 rounded-full bg-slate-400" />
+                      Status will be set to <strong className="text-slate-600 dark:text-slate-300">New</strong> — change it from the bug detail after creation.
+                    </p>
+                  )}
                 </div>
               )}
 

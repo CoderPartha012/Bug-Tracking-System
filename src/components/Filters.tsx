@@ -49,9 +49,13 @@ const SEV_BADGE: Record<string, string> = {
   low:    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
 };
 const STATUS_BADGE: Record<string, string> = {
-  open:          'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-  'in-progress': 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-  closed:        'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  new:           'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
+  open:          'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  'in-progress': 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300',
+  'in-review':   'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
+  testing:       'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
+  closed:        'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
+  rejected:      'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
 };
 
 // ── Helper components ─────────────────────────────────────────────────────────
@@ -280,9 +284,13 @@ export function Filters() {
           aria-label="Filter by status"
         >
           <option value="all">All Status</option>
+          <option value="new">New</option>
           <option value="open">Open</option>
           <option value="in-progress">In Progress</option>
+          <option value="in-review">In Review</option>
+          <option value="testing">Testing</option>
           <option value="closed">Closed</option>
+          <option value="rejected">Rejected</option>
         </select>
 
         <select

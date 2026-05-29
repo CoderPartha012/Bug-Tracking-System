@@ -1,5 +1,5 @@
 export type Severity = 'low' | 'medium' | 'high';
-export type Status = 'open' | 'in-progress' | 'closed';
+export type Status = 'new' | 'open' | 'in-progress' | 'in-review' | 'testing' | 'closed' | 'rejected';
 export type Role = 'admin' | 'developer' | 'tester';
 
 export interface Comment {

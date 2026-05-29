@@ -1,63 +1,32 @@
 import React, { useState } from 'react';
 import { Bug, Status } from '../types/bug';
 import { useBugs } from '../context/BugContext';
-import { AlertTriangle, Clock, CheckCircle, Edit2, Trash2 } from 'lucide-react';
+import { Edit2, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Tooltip } from './Tooltip';
 import { ConfirmModal } from './ConfirmModal';
+import { STATUS_CONFIGS } from '../lib/statusConfig';
 
 interface KanbanBoardProps {
   bugs: Bug[];
   onEdit: (bug: Bug) => void;
 }
 
-const COLUMNS: {
+interface ColumnConfig {
   status: Status;
   label: string;
-  icon: React.ElementType;
+  color: string;
   tooltip: string;
-  headerBg: string;
-  headerBorder: string;
-  colBg: string;
-  iconCls: string;
-  countCls: string;
-  dropRing: string;
-}[] = [
-  {
-    status: 'open',
-    label: 'Open',
-    icon: AlertTriangle,
-    tooltip: 'Bugs that have been reported and not yet started',
-    headerBg: 'bg-red-50 dark:bg-red-950/40',
-    headerBorder: 'border-red-200 dark:border-red-900/60',
-    colBg: 'bg-slate-50/60 dark:bg-slate-900/40',
-    iconCls: 'text-red-500',
-    countCls: 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-400',
-    dropRing: 'ring-2 ring-red-400 bg-red-50/80 dark:bg-red-950/30',
-  },
-  {
-    status: 'in-progress',
-    label: 'In Progress',
-    icon: Clock,
-    tooltip: 'Bugs actively being worked on',
-    headerBg: 'bg-amber-50 dark:bg-amber-950/40',
-    headerBorder: 'border-amber-200 dark:border-amber-900/60',
-    colBg: 'bg-slate-50/60 dark:bg-slate-900/40',
-    iconCls: 'text-amber-500',
-    countCls: 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-400',
-    dropRing: 'ring-2 ring-amber-400 bg-amber-50/80 dark:bg-amber-950/30',
-  },
-  {
-    status: 'closed',
-    label: 'Closed',
-    icon: CheckCircle,
-    tooltip: 'Bugs that have been resolved and verified',
-    headerBg: 'bg-emerald-50 dark:bg-emerald-950/40',
-    headerBorder: 'border-emerald-200 dark:border-emerald-900/60',
-    colBg: 'bg-slate-50/60 dark:bg-slate-900/40',
-    iconCls: 'text-emerald-500',
-    countCls: 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400',
-    dropRing: 'ring-2 ring-emerald-400 bg-emerald-50/80 dark:bg-emerald-950/30',
-  },
+  collapsible: boolean;
+}
+
+const COLUMNS: ColumnConfig[] = [
+  { status: 'new',         label: 'New',         color: '#6B7280', tooltip: 'New — just reported, awaiting triage',    collapsible: false },
+  { status: 'open',        label: 'Open',         color: '#3B82F6', tooltip: 'Open — confirmed and queued for work',    collapsible: false },
+  { status: 'in-progress', label: 'In Progress',  color: '#EAB308', tooltip: 'In Progress — actively being worked on', collapsible: false },
+  { status: 'in-review',   label: 'In Review',    color: '#8B5CF6', tooltip: 'In Review — code review in progress',    collapsible: false },
+  { status: 'testing',     label: 'Testing',      color: '#F97316', tooltip: 'Testing — QA verification in progress',  collapsible: false },
+  { status: 'closed',      label: 'Closed',       color: '#22C55E', tooltip: 'Closed — resolved and verified',         collapsible: true  },
+  { status: 'rejected',    label: 'Rejected',     color: '#EF4444', tooltip: "Rejected — won't fix",                   collapsible: true  },
 ];
 
 const SEVERITY_BORDER: Record<string, string> = {
@@ -66,34 +35,40 @@ const SEVERITY_BORDER: Record<string, string> = {
   low:    'border-l-emerald-400',
 };
 
-const SEVERITY_TOOLTIP: Record<string, string> = {
-  high:   'High — requires immediate attention',
-  medium: 'Medium — should be addressed soon',
-  low:    'Low — minor issue, address when possible',
-};
-
 const SEVERITY_BADGE: Record<string, string> = {
   high:   'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400',
   medium: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
   low:    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400',
 };
 
+const SEVERITY_TOOLTIP: Record<string, string> = {
+  high:   'High — requires immediate attention',
+  medium: 'Medium — should be addressed soon',
+  low:    'Low — minor issue, address when possible',
+};
+
 export function KanbanBoard({ bugs, onEdit }: KanbanBoardProps) {
   const { dispatch } = useBugs();
-  const [draggedId, setDraggedId]           = useState<string | null>(null);
-  const [dropTarget, setDropTarget]         = useState<Status | null>(null);
-  const [recentlyMoved, setRecentlyMoved]   = useState<Set<string>>(new Set());
+  const [draggedId, setDraggedId]             = useState<string | null>(null);
+  const [dropTarget, setDropTarget]           = useState<Status | null>(null);
+  const [recentlyMoved, setRecentlyMoved]     = useState<Set<string>>(new Set());
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [collapsed, setCollapsed]             = useState<Set<Status>>(new Set());
+
+  const toggleCollapse = (status: Status) => {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status); else next.add(status);
+      return next;
+    });
+  };
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, bugId: string) => {
     e.dataTransfer.effectAllowed = 'move';
     setDraggedId(bugId);
   };
 
-  const handleDragEnd = () => {
-    setDraggedId(null);
-    setDropTarget(null);
-  };
+  const handleDragEnd = () => { setDraggedId(null); setDropTarget(null); };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>, status: Status) => {
     e.preventDefault();
@@ -102,10 +77,7 @@ export function KanbanBoard({ bugs, onEdit }: KanbanBoardProps) {
   };
 
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-    // Only clear if leaving the column entirely (not entering a child)
-    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
-      setDropTarget(null);
-    }
+    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setDropTarget(null);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetStatus: Status) => {
@@ -113,22 +85,9 @@ export function KanbanBoard({ bugs, onEdit }: KanbanBoardProps) {
     if (!draggedId) return;
     const bug = bugs.find(b => b.id === draggedId);
     if (bug && bug.status !== targetStatus) {
-      dispatch({
-        type: 'UPDATE_BUG',
-        payload: { ...bug, status: targetStatus, updatedAt: new Date().toISOString() },
-      });
-      setRecentlyMoved(prev => {
-        const next = new Set(prev);
-        next.add(draggedId);
-        return next;
-      });
-      setTimeout(() => {
-        setRecentlyMoved(prev => {
-          const next = new Set(prev);
-          next.delete(draggedId!);
-          return next;
-        });
-      }, 500);
+      dispatch({ type: 'UPDATE_BUG', payload: { ...bug, status: targetStatus, updatedAt: new Date().toISOString() } });
+      setRecentlyMoved(prev => { const next = new Set(prev); next.add(draggedId); return next; });
+      setTimeout(() => setRecentlyMoved(prev => { const next = new Set(prev); next.delete(draggedId!); return next; }), 500);
     }
     setDraggedId(null);
     setDropTarget(null);
@@ -138,72 +97,152 @@ export function KanbanBoard({ bugs, onEdit }: KanbanBoardProps) {
 
   return (
     <>
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {COLUMNS.map(col => {
-        const colBugs = bugs.filter(b => b.status === col.status);
-        const isDropTarget = dropTarget === col.status;
-        const Icon = col.icon;
+      <div className="overflow-x-auto pb-2 -mx-1 px-1">
+        <div className="flex gap-3" style={{ minWidth: 'max-content' }}>
+          {COLUMNS.map(col => {
+            const colBugs    = bugs.filter(b => b.status === col.status);
+            const isCollapsed = collapsed.has(col.status);
+            const isDropTarget = dropTarget === col.status;
 
-        return (
-          <div
-            key={col.status}
-            onDragOver={e => handleDragOver(e, col.status)}
-            onDragLeave={handleDragLeave}
-            onDrop={e => handleDrop(e, col.status)}
-            className={`
-              rounded-xl border border-slate-200 dark:border-slate-700
-              transition-all duration-200 min-h-[200px] flex flex-col
-              ${isDropTarget ? col.dropRing : col.colBg}
-            `}
-          >
-            {/* Column header */}
-            <div className={`flex items-center gap-2 px-4 py-3 rounded-t-xl border-b ${col.headerBg} ${col.headerBorder}`}>
-              <Tooltip text={col.tooltip}>
-                <Icon size={15} className={col.iconCls} />
-              </Tooltip>
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">{col.label}</span>
-              <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${col.countCls}`}>
-                {colBugs.length}
-              </span>
-            </div>
-
-            {/* Cards */}
-            <div className="flex-1 p-3 space-y-2.5 overflow-y-auto max-h-[600px]">
-              {colBugs.length === 0 ? (
-                <div className={`h-24 rounded-lg border-2 border-dashed flex items-center justify-center text-xs text-slate-400 dark:text-slate-600 transition-colors ${isDropTarget ? 'border-blue-300 dark:border-blue-700 text-blue-400' : 'border-slate-200 dark:border-slate-700'}`}>
-                  {isDropTarget ? 'Drop here' : 'No bugs'}
+            if (isCollapsed) {
+              return (
+                <div
+                  key={col.status}
+                  className="w-11 flex flex-col rounded-xl border transition-all duration-300 cursor-pointer select-none"
+                  style={{ borderColor: `${col.color}40`, backgroundColor: `${col.color}08` }}
+                  onClick={() => toggleCollapse(col.status)}
+                  title={`Expand ${col.label} (${colBugs.length})`}
+                >
+                  <div
+                    className="flex flex-col items-center py-3 gap-2 rounded-xl"
+                    style={{ borderBottom: `2px solid ${col.color}30` }}
+                  >
+                    <span
+                      className="text-xs font-bold px-1.5 py-0.5 rounded-full"
+                      style={{ backgroundColor: `${col.color}25`, color: col.color }}
+                    >
+                      {colBugs.length}
+                    </span>
+                    <span
+                      className="text-xs font-semibold"
+                      style={{
+                        color: col.color,
+                        writingMode: 'vertical-rl',
+                        textOrientation: 'mixed',
+                        transform: 'rotate(180deg)',
+                        letterSpacing: '0.05em',
+                      }}
+                    >
+                      {col.label}
+                    </span>
+                    <ChevronRight size={12} style={{ color: col.color }} />
+                  </div>
                 </div>
-              ) : (
-                colBugs.map(bug => (
-                  <KanbanCard
-                    key={bug.id}
-                    bug={bug}
-                    isDragging={draggedId === bug.id}
-                    isNew={recentlyMoved.has(bug.id)}
-                    onEdit={onEdit}
-                    onDelete={() => setPendingDeleteId(bug.id)}
-                    onDragStart={handleDragStart}
-                    onDragEnd={handleDragEnd}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-        );
-      })}
-    </div>
+              );
+            }
 
-    {pendingDeleteId && (
-      <ConfirmModal
-        title="Delete Bug"
-        message={`Are you sure you want to delete "${bugToDelete?.title ?? 'this bug'}"? This action cannot be undone.`}
-        onConfirm={() => {
-          dispatch({ type: 'DELETE_BUG', payload: pendingDeleteId });
-          setPendingDeleteId(null);
-        }}
-        onCancel={() => setPendingDeleteId(null)}
-      />
-    )}
+            return (
+              <div
+                key={col.status}
+                onDragOver={e => handleDragOver(e, col.status)}
+                onDragLeave={handleDragLeave}
+                onDrop={e => handleDrop(e, col.status)}
+                className={`w-[200px] flex-shrink-0 rounded-xl border flex flex-col transition-all duration-200 min-h-[200px] ${
+                  isDropTarget ? 'shadow-lg' : ''
+                }`}
+                style={{
+                  borderColor: isDropTarget ? col.color : `${col.color}30`,
+                  backgroundColor: isDropTarget ? `${col.color}08` : undefined,
+                  outline: isDropTarget ? `2px solid ${col.color}` : undefined,
+                  outlineOffset: isDropTarget ? '1px' : undefined,
+                }}
+              >
+                {/* Column header */}
+                <div
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-t-xl border-b"
+                  style={{ backgroundColor: `${col.color}12`, borderColor: `${col.color}25` }}
+                >
+                  <Tooltip text={col.tooltip}>
+                    <span
+                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: col.color }}
+                    />
+                  </Tooltip>
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-1 truncate">
+                    {col.label}
+                  </span>
+                  <span
+                    className="text-xs font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: `${col.color}20`, color: col.color }}
+                  >
+                    {colBugs.length}
+                  </span>
+                  {col.collapsible && (
+                    <button
+                      type="button"
+                      onClick={() => toggleCollapse(col.status)}
+                      className="p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors flex-shrink-0"
+                      title={`Collapse ${col.label}`}
+                      aria-label={`Collapse ${col.label}`}
+                    >
+                      <ChevronLeft size={12} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Cards */}
+                <div className="flex-1 p-2 space-y-2 overflow-y-auto max-h-[560px]">
+                  {colBugs.length === 0 ? (
+                    <div
+                      className={`h-24 rounded-lg border-2 border-dashed flex items-center justify-center text-xs transition-colors ${
+                        isDropTarget ? 'text-slate-500' : 'text-slate-300 dark:text-slate-600'
+                      }`}
+                      style={{ borderColor: isDropTarget ? col.color : undefined }}
+                    >
+                      {isDropTarget ? 'Drop here' : 'No bugs'}
+                    </div>
+                  ) : (
+                    colBugs.map(bug => (
+                      <KanbanCard
+                        key={bug.id}
+                        bug={bug}
+                        isDragging={draggedId === bug.id}
+                        isNew={recentlyMoved.has(bug.id)}
+                        onEdit={onEdit}
+                        onDelete={() => setPendingDeleteId(bug.id)}
+                        onDragStart={handleDragStart}
+                        onDragEnd={handleDragEnd}
+                      />
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Status legend */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 px-1">
+        {STATUS_CONFIGS.map(cfg => (
+          <span key={cfg.status} className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.color }} />
+            {cfg.label}
+          </span>
+        ))}
+        <span className="text-xs text-slate-400 dark:text-slate-500 ml-auto italic">
+          Drag cards between columns • Closed & Rejected are collapsible
+        </span>
+      </div>
+
+      {pendingDeleteId && (
+        <ConfirmModal
+          title="Delete Bug"
+          message={`Are you sure you want to delete "${bugToDelete?.title ?? 'this bug'}"? This action cannot be undone.`}
+          onConfirm={() => { dispatch({ type: 'DELETE_BUG', payload: pendingDeleteId }); setPendingDeleteId(null); }}
+          onCancel={() => setPendingDeleteId(null)}
+        />
+      )}
     </>
   );
 }
@@ -270,7 +309,7 @@ function KanbanCard({ bug, isDragging, isNew, onEdit, onDelete, onDragStart, onD
               {bug.severity}
             </span>
           </Tooltip>
-          <span className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-[100px]" title={bug.assignedTo}>
+          <span className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-[90px]" title={bug.assignedTo}>
             {bug.assignedTo}
           </span>
           <span className="ml-auto text-xs text-slate-400 dark:text-slate-500 tabular-nums flex-shrink-0">

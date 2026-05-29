@@ -5,6 +5,7 @@ import React, {
 import { Bug, Comment, ActivityLog } from '../types/bug';
 import { toast } from 'react-toastify';
 import { addNotification } from '../lib/notifications';
+import { STATUS_CONFIG_MAP, STATUS_ORDER } from '../lib/statusConfig';
 
 export type SortField = 'date' | 'severity' | 'status' | 'assignee';
 
@@ -27,7 +28,6 @@ type BugAction =
   | { type: 'ADD_ACTIVITY_LOG'; payload: { bugId: string; log: ActivityLog } };
 
 const SEVERITY_ORDER: Record<string, number> = { high: 3, medium: 2, low: 1 };
-const STATUS_ORDER:   Record<string, number> = { open: 3, 'in-progress': 2, closed: 1 };
 
 const initialState: BugState = {
   bugs:    [],
@@ -100,18 +100,48 @@ export function BugProvider({ children }: { children: React.ReactNode }) {
   // Side effects live HERE (not in the reducer) so StrictMode double-invoke is safe
   const dispatch = useCallback((action: BugAction) => {
     if (action.type === 'ADD_BUG') {
-      const msg = `Bug created: "${action.payload.title}"`;
+      const shortId = action.payload.id.slice(0, 6).toUpperCase();
+      const msg = `Bug #${shortId} has been created and is now New`;
       toast.success(msg);
       addNotification(msg, 'success');
 
     } else if (action.type === 'UPDATE_BUG') {
       const prev = stateRef.current.bugs.find(b => b.id === action.payload.id);
       const statusChanged = prev && prev.status !== action.payload.status;
-      const msg = statusChanged
-        ? `"${action.payload.title}" moved to ${action.payload.status}`
-        : `Bug updated: "${action.payload.title}"`;
-      toast.info(msg);
-      addNotification(msg, 'info');
+
+      if (statusChanged && prev) {
+        const prevLabel  = STATUS_CONFIG_MAP[prev.status]?.label ?? prev.status;
+        const newLabel   = STATUS_CONFIG_MAP[action.payload.status]?.label ?? action.payload.status;
+        const username   = localStorage.getItem('bug-tracker-username') ?? 'Unknown';
+        const shortId    = action.payload.id.slice(0, 6).toUpperCase();
+
+        let msg: string;
+        if (action.payload.status === 'rejected') {
+          msg = `Bug #${shortId} has been Rejected`;
+        } else if (action.payload.status === 'closed') {
+          msg = `Bug #${shortId} is Closed and verified`;
+        } else if (action.payload.status === 'testing') {
+          msg = `Bug #${shortId} is now in Testing`;
+        } else {
+          msg = `Bug #${shortId} moved to ${newLabel} by ${username}`;
+        }
+        toast.info(msg);
+        addNotification(msg, 'info');
+
+        // Auto-log the status change
+        const logEntry: ActivityLog = {
+          id: crypto.randomUUID(),
+          bugId: action.payload.id,
+          action: 'status_changed',
+          details: `Status changed from ${prevLabel} to ${newLabel} by ${username} on ${new Date().toLocaleDateString()}`,
+          timestamp: new Date().toISOString(),
+        };
+        rawDispatch({ type: 'ADD_ACTIVITY_LOG', payload: { bugId: action.payload.id, log: logEntry } });
+      } else {
+        const msg = `Bug updated: "${action.payload.title}"`;
+        toast.info(msg);
+        addNotification(msg, 'info');
+      }
 
     } else if (action.type === 'DELETE_BUG') {
       const deleted = stateRef.current.bugs.find(b => b.id === action.payload);
