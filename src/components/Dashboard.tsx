@@ -3,7 +3,7 @@ import { useBugs } from '../context/BugContext';
 import { useTheme } from '../context/ThemeContext';
 import {
   AlertCircle, Clock, CheckCircle2, Bug as BugIcon,
-  User, TrendingUp, Activity, Edit2, CalendarDays, BarChart2,
+  User, TrendingUp, Activity, Edit2, BarChart2,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -67,34 +67,9 @@ function buildWeeklyTrend(bugs: Bug[], count = 8) {
   });
 }
 
-function buildHeatmap(bugs: Bug[], totalDays = 91) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const start = new Date(+today - (today.getDay() + totalDays - 7) * DAY_MS);
-  const map: Record<string, number> = {};
-  bugs.forEach(b => {
-    [b.createdAt, b.updatedAt].forEach(ts => {
-      if (ts) { const k = ts.slice(0, 10); map[k] = (map[k] ?? 0) + 1; }
-    });
-  });
-  return Array.from({ length: totalDays }, (_, i) => {
-    const d = new Date(+start + i * DAY_MS);
-    const key = d.toISOString().slice(0, 10);
-    return { date: d, key, count: map[key] ?? 0 };
-  });
-}
-
-function heatBg(count: number) {
-  if (count === 0) return 'bg-slate-100 dark:bg-slate-700/60';
-  if (count === 1) return 'bg-blue-200 dark:bg-blue-900';
-  if (count <= 3) return 'bg-blue-400 dark:bg-blue-700';
-  if (count <= 6) return 'bg-blue-600 dark:bg-blue-500';
-  return 'bg-blue-800 dark:bg-blue-400';
-}
-
 // ── Count-up animation ────────────────────────────────────────────────────────
 
-function CountUpNumber({ target, className }: { target: number; className?: string }) {
+function CountUpNumber({ target, className, style }: { target: number; className?: string; style?: React.CSSProperties }) {
   const [val, setVal] = useState(0);
   useEffect(() => {
     if (target === 0) { setVal(0); return; }
@@ -112,7 +87,7 @@ function CountUpNumber({ target, className }: { target: number; className?: stri
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [target]);
-  return <span className={className}>{val}</span>;
+  return <span className={className} style={style}>{val}</span>;
 }
 
 // ── Card shell ────────────────────────────────────────────────────────────────
@@ -513,132 +488,162 @@ function StatusBreakdownCard({ statusStats, total }: { statusStats: Record<strin
 
 // ── Severity Bar Chart ────────────────────────────────────────────────────────
 
-function BarLabel(props: unknown) {
-  const p = props as { x?: number; y?: number; width?: number; value?: number };
-  if (p.x === undefined || p.y === undefined || p.width === undefined) return null;
-  return (
-    <text x={p.x + p.width / 2} y={p.y - 5} textAnchor="middle" fontSize={11} fontWeight={700} className="fill-slate-600 dark:fill-slate-400">
-      {p.value}
-    </text>
-  );
-}
+const SEV_CFG = {
+  high:   { label: 'High',   gradTop: '#ef4444', gradBot: '#fca5a5', chipBgLight: '#fee2e2', chipBgDark: '#3f0a0a' },
+  medium: { label: 'Medium', gradTop: '#f59e0b', gradBot: '#fde68a', chipBgLight: '#fef3c7', chipBgDark: '#3d1c00' },
+  low:    { label: 'Low',    gradTop: '#22c55e', gradBot: '#86efac', chipBgLight: '#dcfce7', chipBgDark: '#012d16' },
+} as const;
+
+type SevKey = keyof typeof SEV_CFG;
 
 function SeverityBarChart({ severityData }: { severityData: { name: string; value: number }[] }) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const gridColor  = isDark ? '#334155' : '#cbd5e1';
-  const tickColor  = isDark ? '#94a3b8' : '#64748b';
-  const tooltipStyle = {
-    fontSize: 12, borderRadius: 8,
-    border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
-    backgroundColor: isDark ? '#1e293b' : '#ffffff',
-    color: isDark ? '#f1f5f9' : '#0f172a',
+  const total = severityData.reduce((s, d) => s + d.value, 0);
+
+  const gridColor = isDark ? '#1e293b' : '#f1f5f9';
+  const tickColor = isDark ? '#94a3b8' : '#64748b';
+
+  const renderTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ value: number; payload: { name: string } }> }) => {
+    if (!active || !payload?.length) return null;
+    const key = payload[0].payload.name as SevKey;
+    const cfg = SEV_CFG[key];
+    const val = payload[0].value;
+    const pct = total > 0 ? ((val / total) * 100).toFixed(1) : '0';
+    return (
+      <div
+        className="px-4 py-3 rounded-xl"
+        style={{
+          backgroundColor: isDark ? '#0f172a' : '#fff',
+          border: `1.5px solid ${cfg.gradTop}40`,
+          boxShadow: `0 8px 24px -4px ${cfg.gradTop}30`,
+        }}
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cfg.gradTop }} />
+          <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: cfg.gradTop }}>{cfg.label} Severity</span>
+        </div>
+        <p className="text-3xl font-black tabular-nums leading-none" style={{ color: cfg.gradTop }}>{val}</p>
+        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">{pct}% of all bugs</p>
+      </div>
+    );
   };
-  const barColors: Record<string, string> = { high: C.high, medium: C.medium, low: C.low };
+
+  const renderLabel = (props: unknown) => {
+    const p = props as { x?: number; y?: number; width?: number; value?: number; payload?: { name: string } };
+    if (!p.value || p.x === undefined || p.y === undefined || p.width === undefined) return null;
+    const cfg = SEV_CFG[p.payload?.name as SevKey];
+    return (
+      <text
+        x={p.x + p.width / 2}
+        y={p.y - 10}
+        textAnchor="middle"
+        fontSize={15}
+        fontWeight={900}
+        fill={cfg?.gradTop ?? '#94a3b8'}
+      >
+        {p.value}
+      </text>
+    );
+  };
 
   return (
     <Card className="p-6">
-      <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
-        Severity Distribution
-      </h2>
-      <ResponsiveContainer width="100%" height={220}>
-        <BarChart data={severityData} margin={{ top: 20, right: 8, left: -16, bottom: 0 }} barCategoryGap="40%">
-          <CartesianGrid strokeDasharray="3 3" stroke={gridColor} strokeOpacity={0.4} vertical={false} />
-          <XAxis dataKey="name" tick={{ fontSize: 12, fill: tickColor }} axisLine={false} tickLine={false} tickFormatter={v => v.charAt(0).toUpperCase() + v.slice(1)} />
-          <YAxis tick={{ fontSize: 11, fill: tickColor }} axisLine={false} tickLine={false} allowDecimals={false} />
-          <ReTooltip contentStyle={tooltipStyle} formatter={(v: number, _: string, entry: { payload?: { name?: string } }) => [v, entry.payload?.name ? entry.payload.name.charAt(0).toUpperCase() + entry.payload.name.slice(1) : v]} />
-          <Bar dataKey="value" maxBarSize={52} radius={[6, 6, 0, 0]} minPointSize={3} name="Bugs">
-            {severityData.map(entry => <Cell key={entry.name} fill={barColors[entry.name] ?? '#94a3b8'} />)}
-            <LabelList dataKey="value" content={BarLabel} />
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </Card>
-  );
-}
+      <CardHeader
+        icon={AlertCircle}
+        iconBg="bg-rose-50 dark:bg-rose-900/40"
+        iconColor="text-rose-500 dark:text-rose-400"
+        title="Severity Distribution"
+        right={
+          total > 0
+            ? <span className="text-xs font-medium text-slate-400 dark:text-slate-500 tabular-nums">{total} bugs</span>
+            : undefined
+        }
+      />
 
-// ── Calendar Heatmap ──────────────────────────────────────────────────────────
+      {total === 0 ? (
+        <div className="flex flex-col items-center justify-center py-10 text-slate-400 dark:text-slate-500">
+          <AlertCircle size={28} className="mb-2 opacity-30" />
+          <p className="text-sm">No bugs logged yet</p>
+        </div>
+      ) : (
+        <>
+          {/* Bar chart */}
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={severityData} margin={{ top: 28, right: 12, left: -20, bottom: 0 }} barCategoryGap="44%">
+              <defs>
+                {(Object.keys(SEV_CFG) as SevKey[]).map(key => (
+                  <linearGradient key={key} id={`sg-${key}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor={SEV_CFG[key].gradTop} stopOpacity={0.95} />
+                    <stop offset="100%" stopColor={SEV_CFG[key].gradBot} stopOpacity={0.70} />
+                  </linearGradient>
+                ))}
+              </defs>
+              <CartesianGrid stroke={gridColor} strokeOpacity={1} vertical={false} />
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 12, fill: tickColor, fontWeight: 600 }}
+                axisLine={false} tickLine={false}
+                tickFormatter={v => v.charAt(0).toUpperCase() + v.slice(1)}
+              />
+              <YAxis tick={{ fontSize: 11, fill: tickColor }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <ReTooltip
+                content={renderTooltip}
+                cursor={{ fill: isDark ? '#ffffff06' : '#00000005', radius: 8 }}
+              />
+              <Bar dataKey="value" maxBarSize={80} radius={[10, 10, 3, 3]} minPointSize={4}>
+                {severityData.map(entry => (
+                  <Cell key={entry.name} fill={`url(#sg-${entry.name})`} />
+                ))}
+                <LabelList dataKey="value" content={renderLabel} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
 
-type HeatDay = { date: Date; key: string; count: number };
-
-function CalendarHeatmap({ days }: { days: HeatDay[] }) {
-  const weeks: HeatDay[][] = Array.from({ length: 13 }, (_, w) => days.slice(w * 7, w * 7 + 7));
-
-  const monthLabels: { col: number; label: string }[] = [];
-  let lastMonth = -1;
-  weeks.forEach((week, wi) => {
-    const m = week[0]?.date.getMonth() ?? -1;
-    if (m !== lastMonth) {
-      monthLabels.push({ col: wi, label: week[0]?.date.toLocaleDateString('en-US', { month: 'short' }) ?? '' });
-      lastMonth = m;
-    }
-  });
-
-  const DAY_LABELS    = ['', 'M', '', 'W', '', 'F', ''];
-  const totalActivity = days.reduce((s, d) => s + d.count, 0);
-  const activeDays    = days.filter(d => d.count > 0).length;
-  const LEGEND_LEVELS: [number, string][] = [
-    [0, 'No activity'], [1, '1 activity'], [2, '2–3 activities'], [4, '4–6 activities'], [7, '7+ activities'],
-  ];
-
-  return (
-    <Card className="p-5">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <CardHeader
-          icon={CalendarDays}
-          iconBg="bg-violet-50 dark:bg-violet-900/40"
-          iconColor="text-violet-600 dark:text-violet-400"
-          title="Activity Heatmap"
-        />
-        <span className="text-xs text-slate-400 dark:text-slate-500 ml-auto">
-          {totalActivity} activities · {activeDays} active days
-        </span>
-      </div>
-
-      <div className="overflow-x-auto pb-1">
-        <div className="inline-flex flex-col gap-[3px]">
-          <div className="flex gap-[3px]">
-            <div className="w-5 flex-shrink-0" />
-            {weeks.map((week, wi) => {
-              const ml = monthLabels.find(m => m.col === wi);
+          {/* Severity stat chips */}
+          <div className="mt-3 grid grid-cols-3 gap-3">
+            {severityData.map(({ name, value }) => {
+              const cfg = SEV_CFG[name as SevKey];
+              if (!cfg) return null;
+              const pct = Math.round((value / total) * 100);
+              const chipBg = isDark ? cfg.chipBgDark : cfg.chipBgLight;
               return (
-                <div key={wi} className="w-[14px] relative overflow-visible">
-                  {ml && (
-                    <span className="absolute left-0 text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
-                      {ml.label}
-                    </span>
-                  )}
+                <div
+                  key={name}
+                  className="rounded-xl p-3 text-center transition-transform hover:scale-105 duration-150 cursor-default"
+                  style={{ backgroundColor: chipBg }}
+                >
+                  <CountUpNumber
+                    target={value}
+                    className="text-2xl font-black tabular-nums block leading-none"
+                    style={{ color: cfg.gradTop }}
+                  />
+                  <p className="text-[11px] font-bold mt-1 uppercase tracking-wide" style={{ color: cfg.gradTop }}>
+                    {cfg.label}
+                  </p>
+                  <p className="text-[10px] mt-0.5 font-semibold tabular-nums" style={{ color: cfg.gradTop, opacity: 0.65 }}>
+                    {pct}%
+                  </p>
                 </div>
               );
             })}
           </div>
-          {DAY_LABELS.map((dayLabel, ri) => (
-            <div key={ri} className="flex items-center gap-[3px]">
-              <span className="w-5 text-right text-[10px] text-slate-400 dark:text-slate-500 flex-shrink-0 pr-0.5">{dayLabel}</span>
-              {weeks.map((week, wi) => {
-                const cell = week[ri];
-                if (!cell) return <div key={wi} className="w-[14px] h-[14px]" />;
-                const label = cell.count === 0 ? `${cell.key}: no activity` : `${cell.key}: ${cell.count} ${cell.count === 1 ? 'activity' : 'activities'}`;
-                return (
-                  <Tooltip key={wi} text={label} position="top">
-                    <div className={`w-[14px] h-[14px] rounded-[3px] cursor-default transition-colors ${heatBg(cell.count)}`} />
-                  </Tooltip>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
 
-      <div className="flex items-center gap-1.5 mt-4 justify-end flex-wrap">
-        <span className="text-[10px] text-slate-400 dark:text-slate-500">Less</span>
-        {LEGEND_LEVELS.map(([val, label]) => (
-          <Tooltip key={val} text={label} position="top">
-            <div className={`w-[14px] h-[14px] rounded-[3px] cursor-default ${heatBg(val)}`} />
-          </Tooltip>
-        ))}
-        <span className="text-[10px] text-slate-400 dark:text-slate-500">More</span>
-      </div>
+          {/* Proportional distribution strip */}
+          <div className="mt-3 flex rounded-full overflow-hidden h-1.5">
+            {severityData.filter(d => d.value > 0).map(({ name, value }) => (
+              <div
+                key={name}
+                className="h-full transition-all duration-700 ease-out"
+                style={{
+                  width: `${(value / total) * 100}%`,
+                  backgroundColor: SEV_CFG[name as SevKey]?.gradTop,
+                }}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </Card>
   );
 }
@@ -670,7 +675,6 @@ export function Dashboard({ onEdit }: DashboardProps) {
   ];
 
   const weeklyTrend = useMemo(() => buildWeeklyTrend(bugs), [bugs]);
-  const heatmapDays = useMemo(() => buildHeatmap(bugs), [bugs]);
 
   const statCards = [
     { label: 'Total Bugs',   value: total,                      icon: BugIcon,      iconColor: 'text-blue-600',    iconBg: 'bg-blue-100 dark:bg-blue-900/40',       border: 'border-blue-100 dark:border-blue-900/50',    bg: 'bg-blue-50/60 dark:bg-blue-950/30'    },
@@ -715,9 +719,6 @@ export function Dashboard({ onEdit }: DashboardProps) {
 
       {/* ── Severity Bar ── */}
       <SeverityBarChart severityData={severityData} />
-
-      {/* ── Calendar Heatmap ── */}
-      <CalendarHeatmap days={heatmapDays} />
 
     </div>
   );

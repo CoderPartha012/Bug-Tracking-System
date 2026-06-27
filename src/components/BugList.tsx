@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Bug, Status } from '../types/bug';
 import { useBugs } from '../context/BugContext';
-import { AlertTriangle, Trash2, Edit2, ChevronDown, ChevronUp, ArrowRight } from 'lucide-react';
+import { AlertTriangle, Trash2, Edit2, ChevronDown, ChevronUp, ArrowRight, Download } from 'lucide-react';
 import { Comments } from './Comments';
 import { ActivityLog } from './ActivityLog';
 import { Tooltip } from './Tooltip';
@@ -115,7 +115,7 @@ function StatusTabBar({ bugs, activeStatus, onSelect }: TabBarProps) {
   ];
 
   return (
-    <div className="flex overflow-x-auto gap-1.5 mb-4 pb-1 scrollbar-none">
+    <div className="flex overflow-x-auto gap-1.5 pb-1 scrollbar-none">
       {tabs.map(tab => {
         const isActive = activeStatus === tab.key;
         return (
@@ -231,6 +231,29 @@ function StatusStepper({ bug, onStatusChange }: { bug: Bug; onStatusChange: (s: 
   );
 }
 
+// ── CSV export ────────────────────────────────────────────────────────────────
+
+function exportToCSV(bugs: Bug[]) {
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const header = ['Title', 'Description', 'Assigned To', 'Severity', 'Status', 'Created At'];
+  const rows = bugs.map(b => [
+    escape(b.title),
+    escape(b.description),
+    escape(b.assignedTo),
+    escape(b.severity),
+    escape(b.status),
+    escape(new Date(b.createdAt).toLocaleDateString()),
+  ]);
+  const csv = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bugs-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── Main BugList ──────────────────────────────────────────────────────────────
 
 export function BugList({ onEdit, onAddBug }: BugListProps) {
@@ -263,7 +286,22 @@ export function BugList({ onEdit, onAddBug }: BugListProps) {
     <>
       {/* Distribution bar + tab bar — always shown even when list is empty */}
       <BugDistributionBar bugs={state.bugs} />
-      <StatusTabBar bugs={state.bugs} activeStatus={activeTab} onSelect={handleTabSelect} />
+      <div className="flex items-start gap-2 mb-4">
+        <div className="flex-1 min-w-0">
+          <StatusTabBar bugs={state.bugs} activeStatus={activeTab} onSelect={handleTabSelect} />
+        </div>
+        <Tooltip text="Download visible bugs as CSV">
+          <button
+            type="button"
+            onClick={() => exportToCSV(filteredBugs)}
+            disabled={filteredBugs.length === 0}
+            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all mt-0.5"
+          >
+            <Download size={13} />
+            Export CSV
+          </button>
+        </Tooltip>
+      </div>
 
       {filteredBugs.length === 0 ? (
         <EmptyState

@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Bug, Severity, Status } from '../types/bug';
 import { useBugs } from '../context/BugContext';
 import { STATUS_CONFIGS } from '../lib/statusConfig';
 import {
   X, ChevronRight, ChevronLeft, Zap, CheckCircle,
-  FileText, Settings, Paperclip,
+  FileText, Settings, Paperclip, Upload, Download,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { ImageUpload } from './ImageUpload';
+import { MarkdownEditor } from './MarkdownEditor';
 
 interface BugFormProps {
   bug?: Bug;
@@ -14,9 +16,8 @@ interface BugFormProps {
 }
 
 type FormMode = 'wizard' | 'quick';
-type DescTab = 'write' | 'preview';
 
-const DESCRIPTION_MAX = 1000;
+const DESCRIPTION_MAX = 5000;
 const DRAFT_KEY = 'bug-form-draft';
 
 const emptyForm = {
@@ -32,19 +33,99 @@ const emptyForm = {
 
 const STEPS = [
   { label: 'Basic Info', icon: FileText },
-  { label: 'Details', icon: Settings },
+  { label: 'Details',    icon: Settings },
   { label: 'Attachments', icon: Paperclip },
 ];
+
+// ── CSV helpers ───────────────────────────────────────────────────────────────
+
+function parseCSVRow(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current); current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+type ImportedBug = {
+  title: string; description: string; assignedTo: string;
+  severity: Severity; status: Status;
+};
+
+function parseCSVBugs(text: string): ImportedBug[] {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n').filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const headers = parseCSVRow(lines[0]).map(h => h.toLowerCase().trim().replace(/[\s_]+/g, ''));
+  const idx = (...aliases: string[]) => { for (const a of aliases) { const i = headers.indexOf(a); if (i !== -1) return i; } return -1; };
+
+  const titleIdx    = idx('title', 'bugtitle', 'name', 'subject');
+  if (titleIdx === -1) return [];
+
+  const descIdx     = idx('description', 'desc', 'details', 'body', 'content');
+  const assigneeIdx = idx('assignedto', 'assignee', 'assigned', 'owner', 'responsible');
+  const severityIdx = idx('severity', 'priority', 'sev', 'level');
+  const statusIdx   = idx('status', 'state', 'stage');
+
+  const SEVERITIES: Severity[] = ['low', 'medium', 'high'];
+  const STATUSES: Status[] = ['new', 'open', 'in-progress', 'in-review', 'testing', 'closed', 'rejected'];
+
+  return lines.slice(1).flatMap<ImportedBug>(line => {
+    const cols = parseCSVRow(line);
+    const title = cols[titleIdx]?.trim() ?? '';
+    if (!title) return [];
+    const rawSev    = cols[severityIdx]?.trim().toLowerCase() ?? '';
+    const rawStatus = cols[statusIdx]?.trim().toLowerCase() ?? '';
+    return [{
+      title,
+      description: cols[descIdx]?.trim() || 'Imported from CSV.',
+      assignedTo:  cols[assigneeIdx]?.trim() || 'Unassigned',
+      severity: (SEVERITIES.includes(rawSev as Severity) ? rawSev : 'low') as Severity,
+      status:   (STATUSES.includes(rawStatus as Status)  ? rawStatus : 'new') as Status,
+    }];
+  });
+}
+
+function downloadSampleCSV() {
+  const rows = [
+    ['title', 'description', 'assignedTo', 'severity', 'status'],
+    ['Login button unresponsive', 'Steps to reproduce:\n1. Open login page\n2. Enter valid credentials\n3. Click Login\nExpected: redirect to dashboard\nActual: nothing happens', 'Jane Smith', 'high', 'open'],
+    ['Profile photo not saving', 'Uploading a new profile photo shows success toast but reverts on refresh.', 'John Doe', 'medium', 'new'],
+    ['Slow dashboard load', 'Dashboard takes 8+ seconds to load when more than 50 bugs exist.', 'Alice Chen', 'low', 'in-progress'],
+  ];
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const csv = rows.map(r => r.map(escape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'bugs-sample.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export function BugForm({ bug, onClose }: BugFormProps) {
   const { dispatch } = useBugs();
   const isEdit = !!bug;
 
-  const [mode, setMode] = useState<FormMode>('wizard');
-  const [step, setStep] = useState(0);
-  const [descTab, setDescTab] = useState<DescTab>('write');
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [touched, setTouched] = useState<Set<string>>(new Set());
+  const [mode, setMode]         = useState<FormMode>('wizard');
+  const [step, setStep]         = useState(0);
+  const [errors, setErrors]     = useState<Record<string, string>>({});
+  const [touched, setTouched]   = useState<Set<string>>(new Set());
+  const csvInputRef             = useRef<HTMLInputElement>(null);
 
   const loadInitial = () => {
     if (bug) return { ...emptyForm, ...bug };
@@ -58,16 +139,12 @@ export function BugForm({ bug, onClose }: BugFormProps) {
   const [formData, setFormData] = useState(loadInitial);
   const [hasDraft, setHasDraft] = useState(() => !bug && !!localStorage.getItem(DRAFT_KEY));
 
-  // Auto-save draft whenever form changes
   useEffect(() => {
     if (isEdit) return;
     localStorage.setItem(DRAFT_KEY, JSON.stringify(formData));
   }, [formData, isEdit]);
 
-  const clearDraft = () => {
-    localStorage.removeItem(DRAFT_KEY);
-    setHasDraft(false);
-  };
+  const clearDraft = () => { localStorage.removeItem(DRAFT_KEY); setHasDraft(false); };
 
   const update = <K extends keyof typeof emptyForm>(key: K, value: (typeof emptyForm)[K]) => {
     setFormData(prev => ({ ...prev, [key]: value }));
@@ -80,17 +157,9 @@ export function BugForm({ bug, onClose }: BugFormProps) {
   };
 
   const validate = (key: string, value: string): string => {
-    if (key === 'title') {
-      if (!value.trim()) return 'Title is required';
-      if (value.trim().length < 5) return 'Must be at least 5 characters';
-    }
-    if (key === 'description') {
-      if (!value.trim()) return 'Description is required';
-      if (value.trim().length < 10) return 'Must be at least 10 characters';
-    }
-    if (key === 'assignedTo') {
-      if (!value.trim()) return 'Assignee is required';
-    }
+    if (key === 'title')       { if (!value.trim()) return 'Title is required'; if (value.trim().length < 5) return 'Must be at least 5 characters'; }
+    if (key === 'description') { if (!value.trim()) return 'Description is required'; if (value.trim().length < 10) return 'Must be at least 10 characters'; }
+    if (key === 'assignedTo')  { if (!value.trim()) return 'Assignee is required'; }
     return '';
   };
 
@@ -101,8 +170,7 @@ export function BugForm({ bug, onClose }: BugFormProps) {
     fields.forEach(f => {
       const val = String((formData as Record<string, unknown>)[f] ?? '');
       const err = validate(f, val);
-      newErrors[f] = err;
-      newTouched.add(f);
+      newErrors[f] = err; newTouched.add(f);
       if (err) ok = false;
     });
     setErrors(prev => ({ ...prev, ...newErrors }));
@@ -112,85 +180,127 @@ export function BugForm({ bug, onClose }: BugFormProps) {
 
   const fieldsByStep: string[][] = [['title'], ['description', 'assignedTo'], []];
 
-  const handleNext = () => {
-    if (validateFields(fieldsByStep[step])) setStep(s => s + 1);
-  };
+  const handleNext = () => { if (validateFields(fieldsByStep[step])) setStep(s => s + 1); };
 
   const submit = () => {
-    const allOk = validateFields(['title', 'description', 'assignedTo']);
-    if (!allOk) return;
+    if (!validateFields(['title', 'description', 'assignedTo'])) return;
     const now = new Date().toISOString();
     if (isEdit) {
       dispatch({ type: 'UPDATE_BUG', payload: { ...bug, ...formData, updatedAt: now } as Bug });
     } else {
       dispatch({ type: 'ADD_BUG', payload: { ...formData, id: crypto.randomUUID(), createdAt: now, updatedAt: now } as Bug });
     }
-    clearDraft();
-    onClose();
+    clearDraft(); onClose();
   };
 
   const quickAdd = () => {
     if (!validateFields(['title'])) return;
     const now = new Date().toISOString();
-    dispatch({
-      type: 'ADD_BUG',
-      payload: {
-        ...emptyForm,
-        title: formData.title,
-        severity: formData.severity,
-        description: 'Quick-added — add details later.',
-        assignedTo: 'Unassigned',
-        id: crypto.randomUUID(),
-        createdAt: now,
-        updatedAt: now,
-      } as Bug,
-    });
-    clearDraft();
-    onClose();
+    dispatch({ type: 'ADD_BUG', payload: { ...emptyForm, title: formData.title, severity: formData.severity, description: 'Quick-added — add details later.', assignedTo: 'Unassigned', id: crypto.randomUUID(), createdAt: now, updatedAt: now } as Bug });
+    clearDraft(); onClose();
   };
 
-  // Style helpers
-  const labelCls = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1';
-  const baseInput = 'block w-full rounded-lg text-sm px-3 py-2.5 shadow-sm placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors bg-white dark:bg-slate-800 text-slate-900 dark:text-white';
-  const fieldCls = (key: string) =>
-    `${baseInput} border ${errors[key] && touched.has(key) ? 'border-red-400 dark:border-red-500' : 'border-slate-200 dark:border-slate-700'}`;
-  const errMsg = (key: string) =>
-    errors[key] && touched.has(key)
-      ? <p className="mt-1 text-xs text-red-500">{errors[key]}</p>
-      : null;
+  // ── CSV import ──────────────────────────────────────────────────────────────
 
-  const descLen = (formData.description || '').length;
-  const descNearLimit = descLen > DESCRIPTION_MAX * 0.85;
+  const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const text = ev.target?.result as string;
+      const bugs = parseCSVBugs(text);
+
+      if (bugs.length === 0) {
+        toast.error('No valid bugs found. Make sure the CSV has a "title" column header.');
+        return;
+      }
+
+      const now = new Date().toISOString();
+      bugs.forEach(b => {
+        dispatch({
+          type: 'ADD_BUG',
+          payload: {
+            ...emptyForm, ...b,
+            id: crypto.randomUUID(),
+            createdAt: now, updatedAt: now,
+          } as Bug,
+        });
+      });
+
+      clearDraft();
+      toast.success(`Imported ${bugs.length} bug${bugs.length > 1 ? 's' : ''} from CSV`);
+      onClose();
+    };
+    reader.readAsText(file);
+  };
+
+  // ── Style helpers ───────────────────────────────────────────────────────────
+
+  const labelCls  = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1';
+  const baseInput = 'block w-full rounded-lg text-sm px-3 py-2.5 shadow-sm placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors bg-white dark:bg-slate-800 text-slate-900 dark:text-white';
+  const fieldCls  = (key: string) => `${baseInput} border ${errors[key] && touched.has(key) ? 'border-red-400 dark:border-red-500' : 'border-slate-200 dark:border-slate-700'}`;
+  const errMsg    = (key: string) => errors[key] && touched.has(key) ? <p className="mt-1 text-xs text-red-500">{errors[key]}</p> : null;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start justify-center p-4 overflow-y-auto z-50 pt-8">
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-xl w-full max-w-2xl mb-8">
 
         {/* ── Header ── */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex-wrap gap-2">
+          <div className="flex items-center gap-3 flex-wrap">
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
               {isEdit ? 'Edit Bug' : mode === 'quick' ? 'Quick Add' : 'Add New Bug'}
             </h2>
             {!isEdit && (
-              <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <div className="flex items-center gap-2">
+                {/* Full Form / Quick toggle */}
+                <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setMode('wizard')}
+                    className={`px-3 py-1 text-xs font-medium transition-colors ${mode === 'wizard' ? 'bg-blue-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    Full Form
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode('quick')}
+                    className={`px-3 py-1 text-xs font-medium flex items-center gap-1 transition-colors ${mode === 'quick' ? 'bg-blue-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <Zap size={11} /> Quick
+                  </button>
+                </div>
+
+                {/* Import CSV */}
                 <button
                   type="button"
-                  onClick={() => setMode('wizard')}
-                  className={`px-3 py-1 text-xs font-medium transition-colors ${mode === 'wizard' ? 'bg-blue-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  onClick={() => csvInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                  title="Import multiple bugs from a CSV file"
                 >
-                  Full Form
+                  <Upload size={12} /> Import CSV
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMode('quick')}
-                  className={`px-3 py-1 text-xs font-medium flex items-center gap-1 transition-colors ${mode === 'quick' ? 'bg-blue-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  onClick={downloadSampleCSV}
+                  className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                  title="Download a sample CSV to see the expected format"
                 >
-                  <Zap size={11} /> Quick
+                  <Download size={12} /> Sample CSV
                 </button>
+                <input
+                  ref={csvInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={handleCSVImport}
+                />
               </div>
             )}
           </div>
+
           <div className="flex items-center gap-2">
             {hasDraft && !isEdit && (
               <span className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2 py-1 rounded border border-amber-200 dark:border-amber-800">
@@ -237,35 +347,19 @@ export function BugForm({ bug, onClose }: BugFormProps) {
                     onClick={() => update('severity', s)}
                     className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors capitalize ${
                       formData.severity === s
-                        ? s === 'high'
-                          ? 'bg-red-500 border-red-500 text-white'
-                          : s === 'medium'
-                          ? 'bg-amber-500 border-amber-500 text-white'
+                        ? s === 'high' ? 'bg-red-500 border-red-500 text-white'
+                          : s === 'medium' ? 'bg-amber-500 border-amber-500 text-white'
                           : 'bg-emerald-500 border-emerald-500 text-white'
                         : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
                     }`}
-                  >
-                    {s}
-                  </button>
+                  >{s}</button>
                 ))}
               </div>
             </div>
 
             <div className="flex gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => { clearDraft(); onClose(); }}
-                className="flex-1 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={quickAdd}
-                className="flex-1 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"
-              >
-                <Zap size={14} /> Quick Add
-              </button>
+              <button type="button" onClick={() => { clearDraft(); onClose(); }} className="flex-1 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">Cancel</button>
+              <button type="button" onClick={quickAdd} className="flex-1 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2"><Zap size={14} /> Quick Add</button>
             </div>
           </div>
         )}
@@ -281,17 +375,13 @@ export function BugForm({ bug, onClose }: BugFormProps) {
                     <React.Fragment key={i}>
                       <div className="flex flex-col items-center min-w-0">
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                          i < step
-                            ? 'bg-blue-600 text-white'
-                            : i === step
-                            ? 'bg-blue-600 text-white ring-4 ring-blue-100 dark:ring-blue-900/40'
+                          i < step ? 'bg-blue-600 text-white'
+                            : i === step ? 'bg-blue-600 text-white ring-4 ring-blue-100 dark:ring-blue-900/40'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
                         }`}>
                           {i < step ? <CheckCircle size={14} /> : i + 1}
                         </div>
-                        <span className={`mt-1 text-xs font-medium whitespace-nowrap ${i === step ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'}`}>
-                          {s.label}
-                        </span>
+                        <span className={`mt-1 text-xs font-medium whitespace-nowrap ${i === step ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'}`}>{s.label}</span>
                       </div>
                       {i < STEPS.length - 1 && (
                         <div className={`flex-1 h-0.5 mx-2 mb-4 rounded transition-colors ${i < step ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'}`} />
@@ -303,6 +393,7 @@ export function BugForm({ bug, onClose }: BugFormProps) {
             )}
 
             <div className="px-6 py-5 space-y-5">
+
               {/* Step 1 — Basic Info */}
               {(step === 0 || isEdit) && (
                 <div className="space-y-4">
@@ -323,12 +414,7 @@ export function BugForm({ bug, onClose }: BugFormProps) {
                   <div className={isEdit ? 'grid grid-cols-2 gap-4' : ''}>
                     <div>
                       <label htmlFor="bug-severity" className={labelCls}>Severity</label>
-                      <select
-                        id="bug-severity"
-                        value={formData.severity}
-                        onChange={e => update('severity', e.target.value as Severity)}
-                        className={fieldCls('severity')}
-                      >
+                      <select id="bug-severity" value={formData.severity} onChange={e => update('severity', e.target.value as Severity)} className={fieldCls('severity')}>
                         <option value="low">Low</option>
                         <option value="medium">Medium</option>
                         <option value="high">High</option>
@@ -337,19 +423,13 @@ export function BugForm({ bug, onClose }: BugFormProps) {
                     {isEdit && (
                       <div>
                         <label htmlFor="bug-status" className={labelCls}>Status</label>
-                        <select
-                          id="bug-status"
-                          value={formData.status}
-                          onChange={e => update('status', e.target.value as Status)}
-                          className={fieldCls('status')}
-                        >
-                          {STATUS_CONFIGS.map(cfg => (
-                            <option key={cfg.status} value={cfg.status}>{cfg.label}</option>
-                          ))}
+                        <select id="bug-status" value={formData.status} onChange={e => update('status', e.target.value as Status)} className={fieldCls('status')}>
+                          {STATUS_CONFIGS.map(cfg => <option key={cfg.status} value={cfg.status}>{cfg.label}</option>)}
                         </select>
                       </div>
                     )}
                   </div>
+
                   {!isEdit && (
                     <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
                       <span className="inline-block w-2 h-2 rounded-full bg-slate-400" />
@@ -363,56 +443,20 @@ export function BugForm({ bug, onClose }: BugFormProps) {
               {(step === 1 || isEdit) && (
                 <div className="space-y-4">
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                        Description <span className="text-red-400">*</span>
-                      </label>
-                      <div className="flex rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() => setDescTab('write')}
-                          className={`px-3 py-1 text-xs font-medium transition-colors ${descTab === 'write' ? 'bg-slate-800 dark:bg-slate-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                        >
-                          Write
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDescTab('preview')}
-                          className={`px-3 py-1 text-xs font-medium transition-colors ${descTab === 'preview' ? 'bg-slate-800 dark:bg-slate-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                        >
-                          Preview
-                        </button>
-                      </div>
-                    </div>
-
-                    {descTab === 'write' ? (
-                      <div>
-                        <textarea
-                          value={formData.description}
-                          onChange={e => {
-                            if (e.target.value.length <= DESCRIPTION_MAX)
-                              update('description', e.target.value);
-                          }}
-                          onBlur={() => touch('description')}
-                          className={`${fieldCls('description')} resize-none`}
-                          rows={5}
-                          placeholder="Steps to reproduce, expected vs actual behavior..."
-                        />
-                        <div className="flex items-center justify-between mt-1">
-                          <div>{errMsg('description')}</div>
-                          <span className={`text-xs tabular-nums ${descNearLimit ? 'text-amber-500 font-medium' : 'text-slate-400'}`}>
-                            {descLen}/{DESCRIPTION_MAX}
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className={`min-h-[128px] rounded-lg border ${errors['description'] && touched.has('description') ? 'border-red-400 dark:border-red-500' : 'border-slate-200 dark:border-slate-700'} bg-slate-50 dark:bg-slate-800/50 px-3 py-2.5 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed`}>
-                        {formData.description?.trim()
-                          ? formData.description
-                          : <span className="text-slate-400 italic">Nothing to preview yet…</span>
-                        }
-                      </div>
-                    )}
+                    <label className={labelCls}>
+                      Description <span className="text-red-400">*</span>
+                      <span className="ml-2 text-[11px] font-normal text-slate-400 dark:text-slate-500">Markdown supported</span>
+                    </label>
+                    <MarkdownEditor
+                      value={formData.description}
+                      onChange={v => update('description', v)}
+                      onBlur={() => touch('description')}
+                      maxLength={DESCRIPTION_MAX}
+                      hasError={!!(errors['description'] && touched.has('description'))}
+                      placeholder="Steps to reproduce, expected vs actual behavior… (Markdown supported)"
+                      rows={8}
+                    />
+                    {errMsg('description')}
                   </div>
 
                   <div>
@@ -434,10 +478,7 @@ export function BugForm({ bug, onClose }: BugFormProps) {
               {(step === 2 || isEdit) && (
                 <div>
                   <label className={`${labelCls} mb-2`}>Screenshots</label>
-                  <ImageUpload
-                    images={formData.screenshots || []}
-                    onImagesChange={shots => update('screenshots', shots)}
-                  />
+                  <ImageUpload images={formData.screenshots || []} onImagesChange={shots => update('screenshots', shots)} />
                 </div>
               )}
             </div>
@@ -446,20 +487,8 @@ export function BugForm({ bug, onClose }: BugFormProps) {
             <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/30 rounded-b-2xl">
               {isEdit ? (
                 <>
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={submit}
-                    className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-                  >
-                    Update Bug
-                  </button>
+                  <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">Cancel</button>
+                  <button type="button" onClick={submit} className="px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">Update Bug</button>
                 </>
               ) : (
                 <>
@@ -471,24 +500,14 @@ export function BugForm({ bug, onClose }: BugFormProps) {
                     {step === 0 ? 'Cancel' : <><ChevronLeft size={14} /> Back</>}
                   </button>
 
-                  <span className="text-xs text-slate-400 dark:text-slate-500">
-                    {step + 1} / {STEPS.length} · auto-saved
-                  </span>
+                  <span className="text-xs text-slate-400 dark:text-slate-500">{step + 1} / {STEPS.length} · auto-saved</span>
 
                   {step < STEPS.length - 1 ? (
-                    <button
-                      type="button"
-                      onClick={handleNext}
-                      className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-                    >
+                    <button type="button" onClick={handleNext} className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
                       Next <ChevronRight size={14} />
                     </button>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={submit}
-                      className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-                    >
+                    <button type="button" onClick={submit} className="flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
                       <CheckCircle size={14} /> Add Bug
                     </button>
                   )}
