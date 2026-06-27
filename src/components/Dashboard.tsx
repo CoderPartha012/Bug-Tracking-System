@@ -261,9 +261,9 @@ function SeverityProgressBars({ bugs }: { bugs: Bug[] }) {
   const total = bugs.length;
 
   const bars = [
-    { label: 'High',   count: bugs.filter(b => b.severity === 'high').length,   fillClass: 'bg-red-500',     textClass: 'text-red-500',     tooltip: 'Bugs requiring immediate attention' },
-    { label: 'Medium', count: bugs.filter(b => b.severity === 'medium').length, fillClass: 'bg-amber-500',   textClass: 'text-amber-500',   tooltip: 'Bugs that should be addressed soon' },
-    { label: 'Low',    count: bugs.filter(b => b.severity === 'low').length,    fillClass: 'bg-emerald-500', textClass: 'text-emerald-500', tooltip: 'Minor issues with low urgency' },
+    { label: 'High',   count: bugs.filter(b => b.severity === 'high').length,   color: '#ef4444', bg: 'bg-red-500',     track: 'bg-red-100 dark:bg-red-950/60',   tooltip: 'Bugs requiring immediate attention' },
+    { label: 'Medium', count: bugs.filter(b => b.severity === 'medium').length, color: '#f59e0b', bg: 'bg-amber-500',   track: 'bg-amber-100 dark:bg-amber-950/60', tooltip: 'Bugs that should be addressed soon' },
+    { label: 'Low',    count: bugs.filter(b => b.severity === 'low').length,    color: '#22c55e', bg: 'bg-emerald-500', track: 'bg-emerald-100 dark:bg-emerald-950/60', tooltip: 'Minor issues with low urgency' },
   ];
 
   return (
@@ -273,42 +273,65 @@ function SeverityProgressBars({ bugs }: { bugs: Bug[] }) {
         iconBg="bg-orange-50 dark:bg-orange-900/40"
         iconColor="text-orange-500 dark:text-orange-400"
         title="Severity Breakdown"
+        right={total > 0 ? <span className="text-xs font-medium text-slate-400 dark:text-slate-500 tabular-nums">{total} bugs</span> : undefined}
       />
 
-      <div className="flex-1 space-y-5">
-        {bars.map(({ label, count, fillClass, textClass, tooltip }) => {
+      <div className="flex-1 space-y-4">
+        {bars.map(({ label, count, color, bg, track, tooltip }) => {
           const pct = total > 0 ? (count / total) * 100 : 0;
           return (
             <div key={label}>
-              <div className="flex justify-between items-center mb-2">
+              <div className="flex justify-between items-center mb-1.5">
                 <Tooltip text={tooltip}>
-                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300 cursor-default">{label}</span>
+                  <div className="flex items-center gap-2 cursor-default">
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                    <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">{label}</span>
+                  </div>
                 </Tooltip>
                 <div className="flex items-center gap-2">
-                  <span className={`text-sm font-bold tabular-nums ${textClass}`}>{count}</span>
-                  <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums w-8 text-right">{total > 0 ? `${pct.toFixed(0)}%` : '—'}</span>
+                  <span className="text-sm font-black tabular-nums" style={{ color }}>{count}</span>
+                  <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums w-8 text-right font-medium">
+                    {total > 0 ? `${pct.toFixed(0)}%` : '—'}
+                  </span>
                 </div>
               </div>
-              {count === 0 ? (
-                <div className="h-3 rounded-full border-2 border-dashed border-slate-200 dark:border-slate-700" />
-              ) : (
-                <div className="h-3 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
-                  <div className={`h-full rounded-full transition-all duration-700 ease-out ${fillClass}`} style={{ width: `${pct}%` }} />
-                </div>
-              )}
+              <div className={`h-2.5 rounded-full overflow-hidden ${track}`}>
+                {count === 0 ? (
+                  <div className="h-full w-0" />
+                ) : (
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ease-out ${bg}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                )}
+              </div>
             </div>
           );
         })}
       </div>
 
-      <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 grid grid-cols-3 text-center gap-2">
-        {bars.map(({ label, count, textClass }) => (
-          <div key={label}>
-            <p className={`text-lg font-bold tabular-nums ${textClass}`}>{count}</p>
-            <p className="text-xs text-slate-400 dark:text-slate-500">{label}</p>
+      {/* Mini donut-style ratio strip */}
+      {total > 0 && (
+        <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700">
+          <div className="flex rounded-full overflow-hidden h-2 mb-3">
+            {bars.filter(b => b.count > 0).map(({ label, count, color }) => (
+              <div
+                key={label}
+                className="h-full transition-all duration-700 ease-out"
+                style={{ width: `${(count / total) * 100}%`, backgroundColor: color }}
+              />
+            ))}
           </div>
-        ))}
-      </div>
+          <div className="grid grid-cols-3 text-center gap-1">
+            {bars.map(({ label, count, color }) => (
+              <div key={label}>
+                <p className="text-base font-black tabular-nums" style={{ color }}>{count}</p>
+                <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide mt-0.5">{label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -318,13 +341,40 @@ function SeverityProgressBars({ bugs }: { bugs: Bug[] }) {
 function WeeklyTrendChart({ data }: { data: { week: string; Opened: number; Closed: number; Rejected: number }[] }) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const gridColor   = isDark ? '#334155' : '#cbd5e1';
-  const tickColor   = isDark ? '#94a3b8' : '#64748b';
-  const tooltipStyle = {
-    fontSize: 12, borderRadius: 8,
-    border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
-    backgroundColor: isDark ? '#1e293b' : '#ffffff',
-    color: isDark ? '#f1f5f9' : '#0f172a',
+  const gridColor = isDark ? '#1e293b' : '#f1f5f9';
+  const tickColor = isDark ? '#94a3b8' : '#64748b';
+
+  const LINES = [
+    { key: 'Opened',   color: C.open,     width: 2.5, dash: undefined },
+    { key: 'Closed',   color: C.closed,   width: 2.5, dash: undefined },
+    { key: 'Rejected', color: C.rejected, width: 2,   dash: '5 3'    },
+  ] as const;
+
+  const totalOpened   = data.reduce((s, d) => s + d.Opened, 0);
+  const totalClosed   = data.reduce((s, d) => s + d.Closed, 0);
+  const totalRejected = data.reduce((s, d) => s + d.Rejected, 0);
+
+  const renderTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ dataKey: string; value: number; color: string }>; label?: string }) => {
+    if (!active || !payload?.length) return null;
+    return (
+      <div
+        className="px-3 py-2.5 rounded-xl text-xs"
+        style={{
+          backgroundColor: isDark ? '#0f172a' : '#fff',
+          border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+          boxShadow: '0 8px 24px -4px rgb(0 0 0 / 0.15)',
+        }}
+      >
+        <p className="font-semibold text-slate-500 dark:text-slate-400 mb-2">{label}</p>
+        {payload.map(p => (
+          <div key={p.dataKey} className="flex items-center gap-2 mb-1 last:mb-0">
+            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: p.color }} />
+            <span className="text-slate-600 dark:text-slate-300 w-14">{p.dataKey}</span>
+            <span className="font-bold tabular-nums ml-auto" style={{ color: p.color }}>{p.value}</span>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -335,19 +385,50 @@ function WeeklyTrendChart({ data }: { data: { week: string; Opened: number; Clos
         iconColor="text-blue-600 dark:text-blue-400"
         title="Weekly Trend"
       />
+
       <div className="flex-1">
-        <ResponsiveContainer width="100%" height={185}>
-          <LineChart data={data} margin={{ top: 6, right: 8, left: -22, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={gridColor} strokeOpacity={0.4} vertical={false} />
+        <ResponsiveContainer width="100%" height={155}>
+          <LineChart data={data} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
+            <defs>
+              {LINES.map(({ key, color }) => (
+                <linearGradient key={key} id={`wt-grad-${key}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%"   stopColor={color} stopOpacity={0.15} />
+                  <stop offset="100%" stopColor={color} stopOpacity={0.01} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid stroke={gridColor} strokeOpacity={1} vertical={false} />
             <XAxis dataKey="week" tick={{ fontSize: 10, fill: tickColor }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
             <YAxis tick={{ fontSize: 10, fill: tickColor }} axisLine={false} tickLine={false} allowDecimals={false} />
-            <ReTooltip contentStyle={tooltipStyle} />
-            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-            <Line type="monotone" dataKey="Opened" stroke={C.open} strokeWidth={3} dot={{ r: 4, fill: C.open, strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0 }} />
-            <Line type="monotone" dataKey="Closed" stroke={C.closed} strokeWidth={3} dot={{ r: 4, fill: C.closed, strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0 }} />
-            <Line type="monotone" dataKey="Rejected" stroke={C.rejected} strokeWidth={2} strokeDasharray="4 2" dot={{ r: 3, fill: C.rejected, strokeWidth: 0 }} activeDot={{ r: 5, strokeWidth: 0 }} />
+            <ReTooltip content={renderTooltip} cursor={{ stroke: isDark ? '#334155' : '#e2e8f0', strokeWidth: 1.5, strokeDasharray: '4 2' }} />
+            {LINES.map(({ key, color, width, dash }) => (
+              <Line
+                key={key}
+                type="monotone"
+                dataKey={key}
+                stroke={color}
+                strokeWidth={width}
+                strokeDasharray={dash}
+                dot={{ r: 3.5, fill: color, strokeWidth: 0 }}
+                activeDot={{ r: 5.5, fill: color, stroke: isDark ? '#0f172a' : '#fff', strokeWidth: 2 }}
+              />
+            ))}
           </LineChart>
         </ResponsiveContainer>
+      </div>
+
+      {/* Summary row */}
+      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 grid grid-cols-3 text-center gap-1">
+        {[
+          { label: 'Opened',   value: totalOpened,   color: C.open },
+          { label: 'Closed',   value: totalClosed,   color: C.closed },
+          { label: 'Rejected', value: totalRejected, color: C.rejected },
+        ].map(({ label, value, color }) => (
+          <div key={label}>
+            <p className="text-base font-black tabular-nums" style={{ color }}>{value}</p>
+            <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide mt-0.5">{label}</p>
+          </div>
+        ))}
       </div>
     </Card>
   );
@@ -358,6 +439,7 @@ function WeeklyTrendChart({ data }: { data: { week: string; Opened: number; Clos
 function StatusPieChart({ statusStats, total }: { statusStats: Record<string, number>; total: number }) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const [activeIdx, setActiveIdx] = useState<number | null>(null);
 
   const rows = STATUS_CONFIGS.map(cfg => ({
     key:   cfg.status,
@@ -365,73 +447,111 @@ function StatusPieChart({ statusStats, total }: { statusStats: Record<string, nu
     value: statusStats[cfg.status] ?? 0,
     color: cfg.color,
   }));
-
   const pieData = rows.filter(r => r.value > 0);
 
-  const tooltipStyle = {
-    fontSize: 12, borderRadius: 8,
-    border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
-    backgroundColor: isDark ? '#1e293b' : '#ffffff',
-    color: isDark ? '#f1f5f9' : '#0f172a',
+  const renderTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number; payload: { color: string } }> }) => {
+    if (!active || !payload?.length) return null;
+    const { name, value } = payload[0];
+    const color = payload[0].payload.color;
+    const pct = total > 0 ? ((value / total) * 100).toFixed(1) : '0';
+    return (
+      <div
+        className="px-3 py-2.5 rounded-xl text-xs"
+        style={{
+          backgroundColor: isDark ? '#0f172a' : '#fff',
+          border: `1.5px solid ${color}40`,
+          boxShadow: `0 8px 24px -4px ${color}30`,
+        }}
+      >
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+          <span className="font-semibold text-slate-700 dark:text-slate-300">{name}</span>
+        </div>
+        <p className="text-xl font-black tabular-nums leading-none" style={{ color }}>{value}</p>
+        <p className="text-slate-400 dark:text-slate-500 mt-1">{pct}% of total</p>
+      </div>
+    );
   };
 
   return (
     <Card className="p-6">
-      <h2 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-4">
-        Status Distribution
-      </h2>
+      <CardHeader
+        icon={CheckCircle2}
+        iconBg="bg-sky-50 dark:bg-sky-900/40"
+        iconColor="text-sky-500 dark:text-sky-400"
+        title="Status Distribution"
+        right={total > 0 ? <span className="text-xs font-medium text-slate-400 dark:text-slate-500 tabular-nums">{total} total</span> : undefined}
+      />
 
       {total === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 text-slate-400 dark:text-slate-500">
-          <AlertCircle size={32} className="mb-2 opacity-40" />
+          <AlertCircle size={28} className="mb-2 opacity-30" />
           <p className="text-sm">No bugs logged yet</p>
         </div>
       ) : (
-        <div className="flex gap-6 items-center flex-wrap">
+        <div className="flex gap-5 items-center flex-wrap">
           {/* Donut */}
           <div className="relative flex-shrink-0">
-            <PieChart width={200} height={170}>
+            <PieChart width={190} height={170}>
+              <defs>
+                {pieData.map(entry => (
+                  <radialGradient key={entry.key} id={`pie-grad-${entry.key}`} cx="50%" cy="50%" r="50%">
+                    <stop offset="0%"   stopColor={entry.color} stopOpacity={1}    />
+                    <stop offset="100%" stopColor={entry.color} stopOpacity={0.75} />
+                  </radialGradient>
+                ))}
+              </defs>
               <Pie
                 data={pieData}
-                cx={100} cy={85}
-                innerRadius={48}
+                cx={95} cy={85}
+                innerRadius={46}
                 outerRadius={78}
-                paddingAngle={pieData.length > 1 ? 3 : 0}
+                paddingAngle={pieData.length > 1 ? 2 : 0}
                 dataKey="value"
                 startAngle={90}
                 endAngle={-270}
                 strokeWidth={0}
+                onMouseEnter={(_, idx) => setActiveIdx(idx)}
+                onMouseLeave={() => setActiveIdx(null)}
               >
-                {pieData.map(entry => (
-                  <Cell key={entry.key} fill={entry.color} />
+                {pieData.map((entry, idx) => (
+                  <Cell
+                    key={entry.key}
+                    fill={`url(#pie-grad-${entry.key})`}
+                    opacity={activeIdx === null || activeIdx === idx ? 1 : 0.45}
+                    style={{ transition: 'opacity 0.2s, transform 0.2s', transformOrigin: '95px 85px', transform: activeIdx === idx ? 'scale(1.04)' : 'scale(1)', cursor: 'pointer' }}
+                  />
                 ))}
               </Pie>
-              <ReTooltip
-                contentStyle={tooltipStyle}
-                formatter={(value: number, name: string) => {
-                  const pct = total > 0 ? `${((value / total) * 100).toFixed(0)}%` : '';
-                  return [`${value} (${pct})`, name];
-                }}
-              />
+              <ReTooltip content={renderTooltip} />
             </PieChart>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <CountUpNumber target={total} className="text-2xl font-bold text-slate-900 dark:text-white leading-none" />
-              <span className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Total</span>
+              <CountUpNumber target={activeIdx !== null ? (pieData[activeIdx]?.value ?? total) : total} className="text-2xl font-black text-slate-900 dark:text-white leading-none" />
+              <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 mt-0.5">
+                {activeIdx !== null ? pieData[activeIdx]?.label : 'Total'}
+              </span>
             </div>
           </div>
 
           {/* Legend */}
-          <div className="flex-1 min-w-[140px] space-y-1.5">
-            {rows.map(({ key, label, value, color }) => (
-              <div key={key} className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-                <span className="flex-1 text-xs text-slate-600 dark:text-slate-400">{label}</span>
-                <span className="text-xs font-bold tabular-nums text-slate-800 dark:text-slate-200">{value}</span>
-                <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums w-8 text-right">
-                  {total > 0 ? `${((value / total) * 100).toFixed(0)}%` : '—'}
-                </span>
-              </div>
-            ))}
+          <div className="flex-1 min-w-[130px] space-y-1.5">
+            {rows.map(({ key, label, value, color }, idx) => {
+              const pct = total > 0 ? ((value / total) * 100).toFixed(0) : '0';
+              const isActive = activeIdx === pieData.findIndex(p => p.key === key);
+              return (
+                <div
+                  key={key}
+                  className={`flex items-center gap-2 px-2 py-1 rounded-lg transition-all duration-150 cursor-default ${isActive ? 'bg-slate-100 dark:bg-slate-700/60' : ''}`}
+                  onMouseEnter={() => setActiveIdx(pieData.findIndex(p => p.key === key))}
+                  onMouseLeave={() => setActiveIdx(null)}
+                >
+                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 transition-transform" style={{ backgroundColor: color, transform: isActive ? 'scale(1.3)' : 'scale(1)' }} />
+                  <span className={`flex-1 text-xs transition-colors ${isActive ? 'text-slate-800 dark:text-white font-semibold' : 'text-slate-600 dark:text-slate-400'}`}>{label}</span>
+                  <span className="text-xs font-black tabular-nums" style={{ color }}>{value}</span>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums w-7 text-right font-medium">{pct}%</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -442,6 +562,8 @@ function StatusPieChart({ statusStats, total }: { statusStats: Record<string, nu
 // ── Status Breakdown Card (7 progress bars) ───────────────────────────────────
 
 function StatusBreakdownCard({ statusStats, total }: { statusStats: Record<string, number>; total: number }) {
+  const [hovered, setHovered] = useState<string | null>(null);
+
   return (
     <Card className="p-6">
       <CardHeader
@@ -449,39 +571,71 @@ function StatusBreakdownCard({ statusStats, total }: { statusStats: Record<strin
         iconBg="bg-violet-50 dark:bg-violet-900/40"
         iconColor="text-violet-600 dark:text-violet-400"
         title="Status Breakdown"
+        right={total > 0 ? <span className="text-xs font-medium text-slate-400 dark:text-slate-500 tabular-nums">{total} bugs</span> : undefined}
       />
-      <div className="space-y-3">
-        {STATUS_CONFIGS.map(cfg => {
-          const count = statusStats[cfg.status] ?? 0;
-          const pct   = total > 0 ? (count / total) * 100 : 0;
-          return (
-            <div key={cfg.status}>
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.color }} />
-                  <span className="text-sm text-slate-700 dark:text-slate-300">{cfg.label}</span>
+
+      {total === 0 ? (
+        <div className="flex flex-col items-center justify-center py-8 text-slate-400 dark:text-slate-500">
+          <AlertCircle size={28} className="mb-2 opacity-30" />
+          <p className="text-sm">No bugs logged yet</p>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-2.5">
+            {STATUS_CONFIGS.map(cfg => {
+              const count = statusStats[cfg.status] ?? 0;
+              const pct   = total > 0 ? (count / total) * 100 : 0;
+              const isHovered = hovered === cfg.status;
+              return (
+                <div
+                  key={cfg.status}
+                  className={`rounded-xl px-3 py-2 transition-all duration-150 cursor-default ${isHovered ? 'bg-slate-50 dark:bg-slate-700/50' : ''}`}
+                  onMouseEnter={() => setHovered(cfg.status)}
+                  onMouseLeave={() => setHovered(null)}
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-2 h-2 rounded-full flex-shrink-0 transition-transform duration-150"
+                        style={{ backgroundColor: cfg.color, transform: isHovered ? 'scale(1.4)' : 'scale(1)' }}
+                      />
+                      <span className={`text-xs font-semibold transition-colors ${isHovered ? 'text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-400'}`}>
+                        {cfg.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-black tabular-nums" style={{ color: cfg.color }}>{count}</span>
+                      <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 tabular-nums w-7 text-right">
+                        {pct.toFixed(0)}%
+                      </span>
+                    </div>
+                  </div>
+                  <div className="h-2 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700/80">
+                    <div
+                      className="h-full rounded-full transition-all duration-700 ease-out"
+                      style={{
+                        width: count === 0 ? '0%' : `${pct}%`,
+                        background: `linear-gradient(90deg, ${cfg.color}dd, ${cfg.color}88)`,
+                      }}
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold tabular-nums" style={{ color: cfg.color }}>{count}</span>
-                  <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums w-8 text-right">
-                    {total > 0 ? `${pct.toFixed(0)}%` : '—'}
-                  </span>
-                </div>
-              </div>
-              {count === 0 ? (
-                <div className="h-2 rounded-full border-2 border-dashed border-slate-200 dark:border-slate-700" />
-              ) : (
-                <div className="h-2 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700">
-                  <div
-                    className="h-full rounded-full transition-all duration-700 ease-out"
-                    style={{ width: `${pct}%`, backgroundColor: cfg.color }}
-                  />
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+              );
+            })}
+          </div>
+
+          {/* Distribution strip */}
+          <div className="mt-4 flex rounded-full overflow-hidden h-1.5">
+            {STATUS_CONFIGS.filter(cfg => (statusStats[cfg.status] ?? 0) > 0).map(cfg => (
+              <div
+                key={cfg.status}
+                className="h-full transition-all duration-700 ease-out"
+                style={{ width: `${((statusStats[cfg.status] ?? 0) / total) * 100}%`, backgroundColor: cfg.color }}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </Card>
   );
 }
